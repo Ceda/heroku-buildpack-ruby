@@ -59,7 +59,8 @@ class LanguagePack::Ruby < LanguagePack::Base
   def default_config_vars
     instrument "ruby.default_config_vars" do
       vars = {
-        "LANG" => env("LANG") || "en_US.UTF-8"
+        "LANG" => env("LANG") || "en_US.UTF-8",
+        'KOOK' => 'ads'
       }
 
       ruby_version.jruby? ? vars.merge({
@@ -98,6 +99,8 @@ WARNING
       install_ruby
       install_jvm
       setup_language_pack_environment
+      setup_database
+
       setup_export
       setup_profiled
       allow_git do
@@ -722,6 +725,16 @@ https://devcenter.heroku.com/articles/ruby-versions#your-ruby-version-is-x-but-y
     end
   end
 
+  def setup_database
+    instrument 'ruby.setup_database' do
+      log("setup_database") do
+        topic("setup DATABASE_URL")
+          set_export_default "JAVA_OPTS",  'default_java_opts'
+          set_export_override "DATABASE_URLX", "TEST"
+      end
+    end
+  end
+
   # writes ERB based database.yml for Rails. The database.yml uses the DATABASE_URL from the environment during runtime.
   def create_database_yml
     instrument 'ruby.create_database_yml' do
@@ -729,7 +742,7 @@ https://devcenter.heroku.com/articles/ruby-versions#your-ruby-version-is-x-but-y
       return false if  bundler.has_gem?('activerecord') && bundler.gem_version('activerecord') >= Gem::Version.new('4.1.0.beta1')
 
       log("create_database_yml") do
-        topic("Writing config/database.yml to read from DATABASE_URL")
+        topic("Writing config/database.yml to read from DATABASE_URL Kokot")
         File.open("config/database.yml", "w") do |file|
           file.puts <<-DATABASE_YML
 <%
@@ -826,7 +839,7 @@ params = CGI.parse(uri.query || "")
   # decides if we need to enable the dev database addon
   # @return [Array] the database addon if the pg gem is detected or an empty Array if it isn't.
   def add_dev_database_addon
-    pg_adapters.any? {|a| bundler.has_gem?(a) } ? ['heroku-postgresql'] : []
+    # pg_adapters.any? {|a| bundler.has_gem?(a) } ? ['heroku-postgresql'] : []
   end
 
   def pg_adapters
