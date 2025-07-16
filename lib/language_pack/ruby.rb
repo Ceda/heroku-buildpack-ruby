@@ -300,7 +300,7 @@ private
     # OpenSSL compatibility for Ruby 2.6.6 on heroku-22
     if (@stack == "heroku-22" || @stack == "heroku-24") && ruby_version.ruby_version == "2.6.6"
       compat_lib_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/compat/lib"
-      wrapper_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby_with_openssl"
+      ruby_bin_backup = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby.bin"
 
       if File.directory?(compat_lib_path)
         ENV["LD_LIBRARY_PATH"] = "#{compat_lib_path}:#{ENV["LD_LIBRARY_PATH"]}"
@@ -309,9 +309,8 @@ private
         # Don't set global SSL environment variables during build to avoid interference
         # These will be set in wrappers and runtime environment only
 
-        # Create bundler wrapper for build time
-        if File.exist?(wrapper_path)
-          ruby_bin_backup = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby.bin"
+        # Create bundler wrapper for build time if ruby.bin exists (wrapper was created)
+        if File.exist?(ruby_bin_backup)
           bundler_wrapper_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/bundle"
           File.open(bundler_wrapper_path, "w") do |f|
             f.write <<~BUNDLER_WRAPPER
@@ -437,19 +436,23 @@ private
       # Create runtime bundler wrapper that uses original ruby binary
       add_to_profiled <<~PROFILE
         # Bundler wrapper for Ruby 2.6.6 OpenSSL compatibility
-        if [ -f "#{ruby_bin_backup}" ]; then
-          cat > "$HOME/bin/bundle" << BUNDLE_WRAPPER
+        RUBY_BIN_BACKUP="\\$HOME/#{slug_vendor_ruby}/bin/ruby.bin"
+        COMPAT_LIB_PATH="\\$HOME/#{slug_vendor_ruby}/compat/lib"
+
+        if [ -f "\\$RUBY_BIN_BACKUP" ]; then
+          mkdir -p "\\$HOME/bin"
+          cat > "\\$HOME/bin/bundle" << 'BUNDLE_WRAPPER'
 #!/bin/bash
-export LD_LIBRARY_PATH="#{compat_lib_path}:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$COMPAT_LIB_PATH:$LD_LIBRARY_PATH"
 
 # Set OpenSSL configuration for Ruby 2.6.6 compatibility
 export OPENSSL_CONF=/dev/null
 export SSL_VERIFY_MODE=none
 export RUBY_OPENSSL_VERIFY_MODE=0
 
-exec "#{ruby_bin_backup}" -S bundle "\$@"
+exec "$RUBY_BIN_BACKUP" -S bundle "$@"
 BUNDLE_WRAPPER
-          chmod +x "$HOME/bin/bundle"
+          chmod +x "\\$HOME/bin/bundle"
         fi
       PROFILE
     end
