@@ -308,12 +308,13 @@ private
 
         # Create bundler wrapper for build time
         if File.exist?(wrapper_path)
+          original_ruby_backup = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby.original"
           bundler_wrapper_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/bundle"
           File.open(bundler_wrapper_path, "w") do |f|
             f.write <<~BUNDLER_WRAPPER
               #!/bin/bash
               export LD_LIBRARY_PATH="#{compat_lib_path}:$LD_LIBRARY_PATH"
-              exec "#{wrapper_path}" -S bundle "$@"
+              exec "#{original_ruby_backup}" -S bundle "$@"
             BUNDLER_WRAPPER
           end
           FileUtils.chmod(0755, bundler_wrapper_path)
@@ -415,26 +416,18 @@ private
     # OpenSSL compatibility for Ruby 2.6.6 on heroku-22
     if @stack == "heroku-22" && ruby_version.ruby_version == "2.6.6"
       compat_lib_path = "#{gem_layer_path}/#{slug_vendor_ruby}/compat/lib"
-      wrapper_path = "#{gem_layer_path}/#{slug_vendor_ruby}/bin/ruby_with_openssl"
+      ruby_original_path = "#{gem_layer_path}/#{slug_vendor_ruby}/bin/ruby.original"
 
       set_env_override "LD_LIBRARY_PATH", "#{compat_lib_path}:$LD_LIBRARY_PATH"
 
-      # Create runtime symlink for Ruby wrapper
+      # Create runtime bundler wrapper that uses original ruby binary
       add_to_profiled <<~PROFILE
-        # Ruby 2.6.6 OpenSSL compatibility
-        if [ -f "#{wrapper_path}" ]; then
-          ln -sf "#{wrapper_path}" "$HOME/#{slug_vendor_ruby}/bin/ruby" 2>/dev/null || true
-        fi
-      PROFILE
-
-      # Also create a bundler wrapper that uses our Ruby
-      add_to_profiled <<~PROFILE
-        # Bundler wrapper for Ruby 2.6.6 compatibility
-        if [ -f "#{wrapper_path}" ]; then
+        # Bundler wrapper for Ruby 2.6.6 OpenSSL compatibility
+        if [ -f "#{ruby_original_path}" ]; then
           cat > "$HOME/bin/bundle" << 'BUNDLE_WRAPPER'
 #!/bin/bash
 export LD_LIBRARY_PATH="#{compat_lib_path}:$LD_LIBRARY_PATH"
-exec "#{wrapper_path}" -S bundle "$@"
+exec "#{ruby_original_path}" -S bundle "$@"
 BUNDLE_WRAPPER
           chmod +x "$HOME/bin/bundle"
         fi
@@ -657,10 +650,24 @@ BUNDLE_WRAPPER
     # For Ruby 2.6.6 on heroku-22, use the OpenSSL compatibility wrapper if available
     if @stack == "heroku-22" && ruby_version.ruby_version == "2.6.6"
       wrapper_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby_with_openssl"
-      if File.exist?(wrapper_path)
-        # Create a symlink so 'ruby' command uses our wrapper
-        ruby_bin_path = File.expand_path(ruby_install_binstub_path(ruby_layer_path))
-        FileUtils.ln_sf(wrapper_path, "#{ruby_bin_path}/ruby") rescue nil
+      ruby_bin_path = File.expand_path(ruby_install_binstub_path(ruby_layer_path))
+      original_ruby = "#{ruby_bin_path}/ruby"
+      original_ruby_backup = "#{ruby_bin_path}/ruby.original"
+
+      if File.exist?(wrapper_path) && File.exist?(original_ruby)
+        # Rename original ruby binary to avoid recursion
+        FileUtils.mv(original_ruby, original_ruby_backup) rescue nil
+        # Copy wrapper as the new ruby binary
+        FileUtils.cp(wrapper_path, original_ruby) rescue nil
+        # Update wrapper to call the renamed original
+        File.open(original_ruby, "w") do |f|
+          f.write <<~WRAPPER
+            #!/bin/bash
+            export LD_LIBRARY_PATH="#{ruby_layer_path}/#{slug_vendor_ruby}/compat/lib:$LD_LIBRARY_PATH"
+            exec "#{original_ruby_backup}" "$@"
+          WRAPPER
+        end
+        FileUtils.chmod(0755, original_ruby)
         puts "       Activated Ruby wrapper with OpenSSL compatibility"
       end
     end
