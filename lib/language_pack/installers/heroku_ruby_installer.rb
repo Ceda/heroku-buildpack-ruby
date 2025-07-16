@@ -191,54 +191,12 @@ class LanguagePack::Installers::HerokuRubyInstaller
           begin
             require 'openssl'
 
-            # Monkey-patch Redis SSL connection to disable hostname verification
-            if defined?(Redis)
-              require 'redis/connection/ruby'
+            # Global SSL settings for maximum compatibility
+            ENV['OPENSSL_CONF'] = '/dev/null'
+            ENV['SSL_VERIFY_MODE'] = 'none'
+            ENV['RUBY_OPENSSL_VERIFY_MODE'] = '0'
 
-              Redis::Connection::Ruby.class_eval do
-                alias_method :original_connect, :connect
-
-                def connect
-                  original_connect
-                rescue OpenSSL::SSL::SSLError => e
-                  if e.message.include?("hostname") || e.message.include?("certificate")
-                    # Retry connection with disabled SSL verification
-                    @sock.close if @sock && !@sock.closed?
-
-                    @sock = TCPSocket.new(@host, @port, @connect_timeout)
-
-                    if @ssl_params
-                      context = OpenSSL::SSL::SSLContext.new
-                      context.verify_mode = OpenSSL::SSL::VERIFY_NONE
-                      context.verify_hostname = false if context.respond_to?(:verify_hostname=)
-
-                      @sock = OpenSSL::SSL::SSLSocket.new(@sock, context)
-                      @sock.hostname = @host if @sock.respond_to?(:hostname=)
-                      @sock.sync_close = true
-                      @sock.connect
-                    end
-
-                    @sock
-                  else
-                    raise e
-                  end
-                end
-              end
-            end
-
-            # Also patch OpenSSL directly for global effect
-            module OpenSSL
-              module SSL
-                def self.verify_certificate_identity(cert, hostname)
-                  # Always return true for hostname verification compatibility
-                  true
-                rescue => e
-                  true
-                end
-              end
-            end
-
-            # Set default SSL context to be more permissive
+            # Set default SSL context to be more permissive globally
             OpenSSL::SSL::SSLContext.class_eval do
               alias_method :original_initialize, :initialize
 
@@ -250,6 +208,211 @@ class LanguagePack::Installers::HerokuRubyInstaller
                 # Silently ignore SSL configuration errors
               end
             end
+
+            # Comprehensive Redis connection patches for all connection types
+            def patch_redis_connection
+              return unless defined?(Redis)
+
+              # Patch the main Redis connection driver
+              if defined?(Redis::Connection::Ruby)
+                Redis::Connection::Ruby.class_eval do
+                  alias_method :original_connect, :connect
+
+                  def connect
+                    original_connect
+                  rescue OpenSSL::SSL::SSLError => e
+                    if e.message.include?("hostname") || e.message.include?("certificate") || e.message.include?("verify")
+                      # Retry connection with completely disabled SSL verification
+                      @sock.close if @sock && !@sock.closed?
+
+                      @sock = TCPSocket.new(@host, @port, @connect_timeout)
+
+                      if @ssl_params
+                        context = OpenSSL::SSL::SSLContext.new
+                        context.verify_mode = OpenSSL::SSL::VERIFY_NONE
+                        context.verify_hostname = false if context.respond_to?(:verify_hostname=)
+                        context.ca_file = nil
+                        context.ca_path = nil
+
+                        @sock = OpenSSL::SSL::SSLSocket.new(@sock, context)
+                        @sock.hostname = @host if @sock.respond_to?(:hostname=)
+                        @sock.sync_close = true
+                        @sock.connect
+                      end
+
+                      @sock
+                    else
+                      raise e
+                    end
+                  end
+                end
+              end
+
+              # Patch Redis client creation to force SSL compatibility
+              Redis.class_eval do
+                alias_method :original_initialize, :initialize
+
+                def initialize(options = {})
+                  if options.is_a?(String)
+                    # Parse URL and modify SSL params
+                    uri = URI.parse(options)
+                    if uri.scheme == 'rediss'
+                      # Convert to hash options
+                      options = {
+                        url: options,
+                        ssl_params: {
+                          verify_mode: OpenSSL::SSL::VERIFY_NONE
+                        }
+                      }
+                    end
+                  elsif options.is_a?(Hash) && (options[:url] || options['url'])
+                    url = options[:url] || options['url']
+                    if url.to_s.start_with?('rediss://')
+                      options[:ssl_params] = {
+                        verify_mode: OpenSSL::SSL::VERIFY_NONE
+                      }.merge(options[:ssl_params] || {})
+                    end
+                  end
+
+                  original_initialize(options)
+                rescue => e
+                  # Fallback with forced SSL compatibility
+                  if options.is_a?(Hash)
+                    options[:ssl_params] = {
+                      verify_mode: OpenSSL::SSL::VERIFY_NONE
+                    }
+                  end
+                  original_initialize(options)
+                end
+              end if defined?(Redis)
+            end
+
+            # Sidekiq-specific patches
+            def patch_sidekiq_redis
+              return unless defined?(Sidekiq)
+
+              # Patch Sidekiq's Redis connection handling
+              if defined?(Sidekiq::RedisConnection)
+                Sidekiq::RedisConnection.class_eval do
+                  alias_method :original_build, :build
+
+                  def self.build(options = {})
+                    if options.is_a?(Hash) && options[:url] && options[:url].start_with?('rediss://')
+                      options[:ssl_params] = {
+                        verify_mode: OpenSSL::SSL::VERIFY_NONE
+                      }.merge(options[:ssl_params] || {})
+                    end
+                    original_build(options)
+                  end
+                end
+              end
+
+              # Also patch Sidekiq configuration
+              Sidekiq.class_eval do
+                class << self
+                  alias_method :original_redis_pool, :redis_pool
+
+                  def redis_pool
+                    original_redis_pool
+                  rescue OpenSSL::SSL::SSLError => e
+                    # If SSL error, reconfigure with SSL compatibility
+                    configure_client do |config|
+                      current_redis = config.redis || {}
+                      if current_redis.is_a?(Hash) && current_redis[:url] && current_redis[:url].start_with?('rediss://')
+                        current_redis[:ssl_params] = {
+                          verify_mode: OpenSSL::SSL::VERIFY_NONE
+                        }
+                        config.redis = current_redis
+                      end
+                    end
+                    original_redis_pool
+                  end
+                end
+              end if defined?(Sidekiq)
+            end
+
+            # Connection pool patches for thread safety
+            def patch_connection_pool
+              return unless defined?(ConnectionPool)
+
+              ConnectionPool.class_eval do
+                alias_method :original_with, :with
+
+                def with
+                  original_with do |conn|
+                    # If it's a Redis connection, ensure SSL compatibility
+                    if conn.respond_to?(:ssl_params=) && defined?(OpenSSL::SSL::VERIFY_NONE)
+                      conn.ssl_params = { verify_mode: OpenSSL::SSL::VERIFY_NONE }
+                    end
+                    yield conn
+                  end
+                rescue OpenSSL::SSL::SSLError => e
+                  # Retry with SSL compatibility
+                  original_with do |conn|
+                    yield conn
+                  end
+                end
+              end
+            end
+
+            # Also patch OpenSSL globally for hostname verification
+            module OpenSSL
+              module SSL
+                def self.verify_certificate_identity(cert, hostname)
+                  # Always return true for hostname verification compatibility
+                  true
+                rescue => e
+                  true
+                end
+
+                # Patch SSLSocket for compatibility
+                class SSLSocket
+                  alias_method :original_post_connection_check, :post_connection_check if method_defined?(:post_connection_check)
+
+                  def post_connection_check(hostname)
+                    # Skip certificate validation
+                    true
+                  rescue => e
+                    true
+                  end
+
+                  alias_method :original_verify_hostname, :verify_hostname if method_defined?(:verify_hostname)
+
+                  def verify_hostname
+                    # Skip hostname verification
+                    true
+                  rescue => e
+                    true
+                  end
+                end
+              end
+            end
+
+            # Early loading - try to patch immediately if gems are available
+            patch_redis_connection
+            patch_sidekiq_redis
+            patch_connection_pool
+
+            # Also hook into require to patch when gems load
+            module RequireHook
+              def require(name)
+                result = super(name)
+                case name
+                when 'redis', 'redis/connection/ruby'
+                  patch_redis_connection
+                when 'sidekiq', 'sidekiq/redis_connection'
+                  patch_sidekiq_redis
+                when 'connection_pool'
+                  patch_connection_pool
+                end
+                result
+              rescue LoadError => e
+                super(name)
+              end
+            end
+
+            # Apply require hook to main object
+            Object.prepend(RequireHook)
 
           rescue => e
             # Silently fail if modules are not available

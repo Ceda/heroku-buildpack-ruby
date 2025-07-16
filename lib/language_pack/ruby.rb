@@ -306,6 +306,11 @@ private
         ENV["LD_LIBRARY_PATH"] = "#{compat_lib_path}:#{ENV["LD_LIBRARY_PATH"]}"
         puts "       Using OpenSSL compatibility layer for Ruby 2.6.6"
 
+        # Set global SSL compatibility environment variables
+        ENV["OPENSSL_CONF"] = "/dev/null"
+        ENV["SSL_VERIFY_MODE"] = "none"
+        ENV["RUBY_OPENSSL_VERIFY_MODE"] = "0"
+
         # Create bundler wrapper for build time
         if File.exist?(wrapper_path)
           original_ruby_backup = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby.original"
@@ -425,6 +430,11 @@ private
       ruby_original_path = "#{gem_layer_path}/#{slug_vendor_ruby}/bin/ruby.original"
 
       set_env_override "LD_LIBRARY_PATH", "#{compat_lib_path}:$LD_LIBRARY_PATH"
+
+      # Set SSL compatibility environment variables for runtime
+      set_env_override "OPENSSL_CONF", "/dev/null"
+      set_env_override "SSL_VERIFY_MODE", "none"
+      set_env_override "RUBY_OPENSSL_VERIFY_MODE", "0"
 
       # Create runtime bundler wrapper that uses original ruby binary
       add_to_profiled <<~PROFILE
