@@ -25,7 +25,7 @@ class LanguagePack::Helpers::DownloadPresence
     # Special case: Ruby 2.6.6 is only available on heroku-20, not heroku-22
     # Check heroku-20 availability when requesting heroku-22
     if file_name == "ruby-2.6.6.tgz"
-      @stacks = stacks.map { |stack| stack == "heroku-22" ? "heroku-20" : stack }
+      @stacks = stacks.map { |stack| (stack == "heroku-22" || stack == "heroku-24") ? "heroku-20" : stack }
     else
       @stacks = stacks
     end

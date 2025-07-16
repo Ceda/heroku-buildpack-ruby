@@ -17,7 +17,7 @@ class LanguagePack::Installers::HerokuRubyInstaller
 
     # Special case: Ruby 2.6.6 is only available on heroku-20
     # We'll download it and add OpenSSL compatibility
-    @needs_openssl_compat = (stack == "heroku-22" && ruby_version&.ruby_version == "2.6.6")
+    @needs_openssl_compat = ((stack == "heroku-22" || stack == "heroku-24") && ruby_version&.ruby_version == "2.6.6")
     effective_stack = @needs_openssl_compat ? "heroku-20" : stack
 
     if multi_arch_stacks.include?(effective_stack)

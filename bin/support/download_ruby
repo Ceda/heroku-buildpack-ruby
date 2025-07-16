@@ -36,6 +36,9 @@ ruby_url() {
   elif [ "$stack" == "heroku-22" ] && [ "$version" == "2.6.6" ]; then
     # Ruby 2.6.6 is only available on heroku-20, use fallback with OpenSSL compatibility layer
     echo "${BUILDPACK_VENDOR_URL:-https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com}/heroku-20/ruby-$version.tgz"
+  elif [ "$stack" == "heroku-24" ] && [ "$version" == "2.6.6" ]; then
+    # Ruby 2.6.6 is only available on heroku-20, use fallback with OpenSSL compatibility layer
+    echo "${BUILDPACK_VENDOR_URL:-https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com}/heroku-20/ruby-$version.tgz"
   else
     echo "${BUILDPACK_VENDOR_URL:-https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com}/$stack/ruby-$version.tgz"
   fi

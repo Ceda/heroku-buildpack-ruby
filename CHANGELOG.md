@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Ruby 2.6.6 is now available on heroku-22 stack via heroku-20 fallback with comprehensive OpenSSL 1.1.1 compatibility layer
+- Ruby 2.6.6 is now available on heroku-22 and heroku-24 stacks via heroku-20 fallback with comprehensive OpenSSL 1.1.1 compatibility layer
   - Downloads OpenSSL 1.1.1 libraries from multiple Ubuntu 20.04 sources (security, updates, main repositories)
   - Fallback extraction of OpenSSL libraries directly from heroku-20 Ruby installation
   - Creates Ruby and Bundler wrappers with proper LD_LIBRARY_PATH setup
@@ -14,7 +14,7 @@
 
 ### Application Configuration Recommendations
 
-For applications using Ruby 2.6.6 on heroku-22, consider adding this to your Redis configuration:
+For applications using Ruby 2.6.6 on heroku-22 or heroku-24, consider adding this to your Redis configuration:
 
 ```ruby
 # config/initializers/redis.rb
