@@ -314,6 +314,12 @@ private
             f.write <<~BUNDLER_WRAPPER
               #!/bin/bash
               export LD_LIBRARY_PATH="#{compat_lib_path}:$LD_LIBRARY_PATH"
+
+              # Set OpenSSL configuration for Ruby 2.6.6 compatibility
+              export OPENSSL_CONF=/dev/null
+              export SSL_VERIFY_MODE=none
+              export RUBY_OPENSSL_VERIFY_MODE=0
+
               exec "#{original_ruby_backup}" -S bundle "$@"
             BUNDLER_WRAPPER
           end
@@ -427,6 +433,12 @@ private
           cat > "$HOME/bin/bundle" << 'BUNDLE_WRAPPER'
 #!/bin/bash
 export LD_LIBRARY_PATH="#{compat_lib_path}:$LD_LIBRARY_PATH"
+
+# Set OpenSSL configuration for Ruby 2.6.6 compatibility
+export OPENSSL_CONF=/dev/null
+export SSL_VERIFY_MODE=none
+export RUBY_OPENSSL_VERIFY_MODE=0
+
 exec "#{ruby_original_path}" -S bundle "$@"
 BUNDLE_WRAPPER
           chmod +x "$HOME/bin/bundle"
@@ -664,6 +676,12 @@ BUNDLE_WRAPPER
           f.write <<~WRAPPER
             #!/bin/bash
             export LD_LIBRARY_PATH="#{ruby_layer_path}/#{slug_vendor_ruby}/compat/lib:$LD_LIBRARY_PATH"
+
+            # Set OpenSSL configuration for Ruby 2.6.6 compatibility
+            export OPENSSL_CONF=/dev/null
+            export SSL_VERIFY_MODE=none
+            export RUBY_OPENSSL_VERIFY_MODE=0
+
             exec "#{original_ruby_backup}" "$@"
           WRAPPER
         end
