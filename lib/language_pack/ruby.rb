@@ -438,7 +438,7 @@ private
       add_to_profiled <<~PROFILE
         # Bundler wrapper for Ruby 2.6.6 OpenSSL compatibility
         if [ -f "#{ruby_bin_backup}" ]; then
-          cat > "$HOME/bin/bundle" << 'BUNDLE_WRAPPER'
+          cat > "$HOME/bin/bundle" << BUNDLE_WRAPPER
 #!/bin/bash
 export LD_LIBRARY_PATH="#{compat_lib_path}:$LD_LIBRARY_PATH"
 
@@ -447,7 +447,7 @@ export OPENSSL_CONF=/dev/null
 export SSL_VERIFY_MODE=none
 export RUBY_OPENSSL_VERIFY_MODE=0
 
-exec "#{ruby_bin_backup}" -S bundle "$@"
+exec "#{ruby_bin_backup}" -S bundle "\$@"
 BUNDLE_WRAPPER
           chmod +x "$HOME/bin/bundle"
         fi
