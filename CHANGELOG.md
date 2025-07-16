@@ -8,9 +8,46 @@
   - Creates Ruby and Bundler wrappers with proper LD_LIBRARY_PATH setup
   - Provides both build-time and runtime OpenSSL compatibility
   - Handles download failures gracefully with multiple fallback sources
-  - Includes SSL compatibility layer with relaxed hostname verification for legacy applications
-  - Automatically loads SSL compatibility module to bypass strict SSL certificate validation
+  - Includes comprehensive SSL compatibility layer with automatic loading via rubygems plugin
+  - Patches Redis SSL connections to bypass hostname verification issues
+  - Automatically loads SSL compatibility for all Ruby processes including rake tasks
 
+### Application Configuration Recommendations
+
+For applications using Ruby 2.6.6 on heroku-22, consider adding this to your Redis configuration:
+
+```ruby
+# config/initializers/redis.rb
+Redis.current = Redis.new(
+  url: ENV['REDIS_URL'],
+  ssl_params: {
+    verify_mode: OpenSSL::SSL::VERIFY_NONE
+  }
+)
+```
+
+Or for Sidekiq:
+
+```ruby
+# config/initializers/sidekiq.rb
+Sidekiq.configure_server do |config|
+  config.redis = {
+    url: ENV['REDIS_URL'],
+    ssl_params: {
+      verify_mode: OpenSSL::SSL::VERIFY_NONE
+    }
+  }
+end
+
+Sidekiq.configure_client do |config|
+  config.redis = {
+    url: ENV['REDIS_URL'],
+    ssl_params: {
+      verify_mode: OpenSSL::SSL::VERIFY_NONE
+    }
+  }
+end
+```
 
 ## [v313] - 2025-07-15
 

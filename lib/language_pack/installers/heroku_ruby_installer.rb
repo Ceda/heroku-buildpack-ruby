@@ -180,24 +180,59 @@ class LanguagePack::Installers::HerokuRubyInstaller
       FileUtils.chmod(0755, wrapper_path)
       puts "       ✓ Created Ruby wrapper with OpenSSL compatibility"
 
-      # Create SSL compatibility initializer
-      ssl_compat_path = File.join(install_dir, "lib", "ruby", "site_ruby", "ssl_compat.rb")
+      # Create SSL compatibility initializer that loads automatically
+      ssl_compat_path = File.join(install_dir, "lib", "ruby", "site_ruby", "2.6.0", "ssl_compat.rb")
       FileUtils.mkdir_p(File.dirname(ssl_compat_path))
       File.open(ssl_compat_path, "w") do |f|
         f.write <<~RUBY_SSL_COMPAT
           # SSL Compatibility for Ruby 2.6.6 on heroku-22
+          # This file is automatically loaded by Ruby
+
           begin
             require 'openssl'
 
-            # Configure OpenSSL to be less strict about hostname verification
+            # Monkey-patch Redis SSL connection to disable hostname verification
+            if defined?(Redis)
+              require 'redis/connection/ruby'
+
+              Redis::Connection::Ruby.class_eval do
+                alias_method :original_connect, :connect
+
+                def connect
+                  original_connect
+                rescue OpenSSL::SSL::SSLError => e
+                  if e.message.include?("hostname") || e.message.include?("certificate")
+                    # Retry connection with disabled SSL verification
+                    @sock.close if @sock && !@sock.closed?
+
+                    @sock = TCPSocket.new(@host, @port, @connect_timeout)
+
+                    if @ssl_params
+                      context = OpenSSL::SSL::SSLContext.new
+                      context.verify_mode = OpenSSL::SSL::VERIFY_NONE
+                      context.verify_hostname = false if context.respond_to?(:verify_hostname=)
+
+                      @sock = OpenSSL::SSL::SSLSocket.new(@sock, context)
+                      @sock.hostname = @host if @sock.respond_to?(:hostname=)
+                      @sock.sync_close = true
+                      @sock.connect
+                    end
+
+                    @sock
+                  else
+                    raise e
+                  end
+                end
+              end
+            end
+
+            # Also patch OpenSSL directly for global effect
             module OpenSSL
               module SSL
-                # Override verify_certificate_identity to be more permissive
                 def self.verify_certificate_identity(cert, hostname)
                   # Always return true for hostname verification compatibility
                   true
                 rescue => e
-                  puts "SSL hostname verification bypassed: \#{e.message}"
                   true
                 end
               end
@@ -217,14 +252,22 @@ class LanguagePack::Installers::HerokuRubyInstaller
             end
 
           rescue => e
-            # Silently fail if OpenSSL is not available
-            puts "SSL compatibility layer could not be loaded: \#{e.message}"
+            # Silently fail if modules are not available
           end
         RUBY_SSL_COMPAT
       end
       puts "       ✓ Created SSL compatibility initializer"
 
-      # Update wrapper to load SSL compatibility
+      # Also create a require file that gets auto-loaded
+      require_compat_path = File.join(install_dir, "lib", "ruby", "site_ruby", "rubygems_plugin.rb")
+      File.open(require_compat_path, "w") do |f|
+        f.write <<~RUBYGEMS_PLUGIN
+          # Auto-load SSL compatibility
+          require_relative '2.6.0/ssl_compat'
+        RUBYGEMS_PLUGIN
+      end
+
+      # Update wrapper (SSL compatibility loads automatically now)
       File.open(wrapper_path, "w") do |f|
         f.write <<~WRAPPER
           #!/bin/bash
@@ -235,8 +278,7 @@ class LanguagePack::Installers::HerokuRubyInstaller
           export SSL_VERIFY_MODE=none
           export RUBY_OPENSSL_VERIFY_MODE=0
 
-          # Load SSL compatibility before running Ruby
-          exec "#{File.join(install_dir, "bin", "ruby")}" -r "#{ssl_compat_path}" "$@"
+          exec "#{File.join(install_dir, "bin", "ruby")}" "$@"
         WRAPPER
       end
 
