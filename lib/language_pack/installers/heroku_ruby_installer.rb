@@ -213,6 +213,9 @@ class LanguagePack::Installers::HerokuRubyInstaller
             def patch_redis_connection
               return unless defined?(Redis)
 
+              # Only patch if Redis is actually being used
+              return unless caller.any? { |line| line.include?('redis') || line.include?('sidekiq') }
+
               # Patch the main Redis connection driver
               if defined?(Redis::Connection::Ruby)
                 Redis::Connection::Ruby.class_eval do
@@ -290,6 +293,7 @@ class LanguagePack::Installers::HerokuRubyInstaller
             # Sidekiq-specific patches
             def patch_sidekiq_redis
               return unless defined?(Sidekiq)
+              return unless caller.any? { |line| line.include?('sidekiq') }
 
               # Patch Sidekiq's Redis connection handling
               if defined?(Sidekiq::RedisConnection)
@@ -334,6 +338,7 @@ class LanguagePack::Installers::HerokuRubyInstaller
             # Connection pool patches for thread safety
             def patch_connection_pool
               return unless defined?(ConnectionPool)
+              return unless caller.any? { |line| line.include?('redis') || line.include?('sidekiq') }
 
               ConnectionPool.class_eval do
                 alias_method :original_with, :with
@@ -388,11 +393,7 @@ class LanguagePack::Installers::HerokuRubyInstaller
               end
             end
 
-            # Early loading - try to patch immediately if gems are available
-            patch_redis_connection
-            patch_sidekiq_redis
-            patch_connection_pool
-
+            # Conservative patching - only apply when needed
             # Also hook into require to patch when gems load
             module RequireHook
               def require(name)
@@ -411,8 +412,10 @@ class LanguagePack::Installers::HerokuRubyInstaller
               end
             end
 
-            # Apply require hook to main object
-            Object.prepend(RequireHook)
+            # Apply require hook to main object only if SSL/networking context
+            if caller.any? { |line| line.include?('redis') || line.include?('sidekiq') || line.include?('ssl') || line.include?('net') }
+              Object.prepend(RequireHook)
+            end
 
           rescue => e
             # Silently fail if modules are not available
@@ -425,8 +428,15 @@ class LanguagePack::Installers::HerokuRubyInstaller
       require_compat_path = File.join(install_dir, "lib", "ruby", "site_ruby", "rubygems_plugin.rb")
       File.open(require_compat_path, "w") do |f|
         f.write <<~RUBYGEMS_PLUGIN
-          # Auto-load SSL compatibility
-          require_relative '2.6.0/ssl_compat'
+          # Auto-load SSL compatibility only when needed
+          begin
+            # Only load if we're in a context where SSL/networking is likely needed
+            if caller.any? { |line| line.include?('redis') || line.include?('sidekiq') || line.include?('ssl') || line.include?('https') }
+              require_relative '2.6.0/ssl_compat'
+            end
+          rescue => e
+            # Silent failure to avoid breaking normal Ruby usage
+          end
         RUBYGEMS_PLUGIN
       end
 

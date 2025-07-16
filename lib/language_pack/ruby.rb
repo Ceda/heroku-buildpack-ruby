@@ -306,10 +306,8 @@ private
         ENV["LD_LIBRARY_PATH"] = "#{compat_lib_path}:#{ENV["LD_LIBRARY_PATH"]}"
         puts "       Using OpenSSL compatibility layer for Ruby 2.6.6"
 
-        # Set global SSL compatibility environment variables
-        ENV["OPENSSL_CONF"] = "/dev/null"
-        ENV["SSL_VERIFY_MODE"] = "none"
-        ENV["RUBY_OPENSSL_VERIFY_MODE"] = "0"
+        # Don't set global SSL environment variables during build to avoid interference
+        # These will be set in wrappers and runtime environment only
 
         # Create bundler wrapper for build time
         if File.exist?(wrapper_path)
