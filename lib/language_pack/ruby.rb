@@ -311,7 +311,7 @@ private
 
         # Create bundler wrapper for build time
         if File.exist?(wrapper_path)
-          original_ruby = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby"
+          ruby_bin_backup = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby.bin"
           bundler_wrapper_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/bundle"
           File.open(bundler_wrapper_path, "w") do |f|
             f.write <<~BUNDLER_WRAPPER
@@ -323,7 +323,7 @@ private
               export SSL_VERIFY_MODE=none
               export RUBY_OPENSSL_VERIFY_MODE=0
 
-              exec "#{original_ruby}" -S bundle "$@"
+              exec "#{ruby_bin_backup}" -S bundle "$@"
             BUNDLER_WRAPPER
           end
           FileUtils.chmod(0755, bundler_wrapper_path)
@@ -425,7 +425,7 @@ private
     # OpenSSL compatibility for Ruby 2.6.6 on heroku-22 and heroku-24
     if (@stack == "heroku-22" || @stack == "heroku-24") && ruby_version.ruby_version == "2.6.6"
       compat_lib_path = "#{gem_layer_path}/#{slug_vendor_ruby}/compat/lib"
-      ruby_path = "#{gem_layer_path}/#{slug_vendor_ruby}/bin/ruby"
+      ruby_bin_backup = "#{gem_layer_path}/#{slug_vendor_ruby}/bin/ruby.bin"
 
       set_env_override "LD_LIBRARY_PATH", "#{compat_lib_path}:$LD_LIBRARY_PATH"
 
@@ -437,7 +437,7 @@ private
       # Create runtime bundler wrapper that uses original ruby binary
       add_to_profiled <<~PROFILE
         # Bundler wrapper for Ruby 2.6.6 OpenSSL compatibility
-        if [ -f "#{ruby_path}" ]; then
+        if [ -f "#{ruby_bin_backup}" ]; then
           cat > "$HOME/bin/bundle" << 'BUNDLE_WRAPPER'
 #!/bin/bash
 export LD_LIBRARY_PATH="#{compat_lib_path}:$LD_LIBRARY_PATH"
@@ -447,7 +447,7 @@ export OPENSSL_CONF=/dev/null
 export SSL_VERIFY_MODE=none
 export RUBY_OPENSSL_VERIFY_MODE=0
 
-exec "#{ruby_path}" -S bundle "$@"
+exec "#{ruby_bin_backup}" -S bundle "$@"
 BUNDLE_WRAPPER
           chmod +x "$HOME/bin/bundle"
         fi
@@ -669,13 +669,16 @@ BUNDLE_WRAPPER
   def setup_ruby_install_env(ruby_layer_path = ".")
     # For Ruby 2.6.6 on heroku-22 and heroku-24, use the OpenSSL compatibility wrapper if available
     if (@stack == "heroku-22" || @stack == "heroku-24") && ruby_version.ruby_version == "2.6.6"
-      wrapper_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/bin/ruby_with_openssl"
       ruby_bin_path = File.expand_path(ruby_install_binstub_path(ruby_layer_path))
       original_ruby = "#{ruby_bin_path}/ruby"
+      wrapper_path = "#{ruby_bin_path}/ruby"
+      ruby_bin_backup = "#{ruby_bin_path}/ruby.bin"
 
-      if File.exist?(wrapper_path) && File.exist?(original_ruby)
-        # Instead of renaming, create a symlink to preserve original ruby
-        # and create wrapper that calls original ruby directly
+      if File.exist?(original_ruby) && !File.exist?(ruby_bin_backup)
+        # Rename original ruby to ruby.bin
+        FileUtils.mv(original_ruby, ruby_bin_backup)
+
+        # Create wrapper with the original name 'ruby'
         File.open(wrapper_path, "w") do |f|
           f.write <<~WRAPPER
             #!/bin/bash
@@ -686,24 +689,11 @@ BUNDLE_WRAPPER
             export SSL_VERIFY_MODE=none
             export RUBY_OPENSSL_VERIFY_MODE=0
 
-            exec "#{original_ruby}" "$@"
+            exec "#{ruby_bin_backup}" "$@"
           WRAPPER
         end
         FileUtils.chmod(0755, wrapper_path)
-
-        # Create environment activation script
-        activate_script = "#{ruby_bin_path}/activate_openssl_compat"
-        File.open(activate_script, "w") do |f|
-          f.write <<~ACTIVATE_SCRIPT
-            #!/bin/bash
-            export LD_LIBRARY_PATH="#{ruby_layer_path}/#{slug_vendor_ruby}/compat/lib:$LD_LIBRARY_PATH"
-            export OPENSSL_CONF=/dev/null
-            export SSL_VERIFY_MODE=none
-            export RUBY_OPENSSL_VERIFY_MODE=0
-          ACTIVATE_SCRIPT
-        end
-        FileUtils.chmod(0755, activate_script)
-        puts "       Activated Ruby wrapper with OpenSSL compatibility"
+        puts "       Replaced ruby binary with OpenSSL compatibility wrapper"
       end
     end
 
