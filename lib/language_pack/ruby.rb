@@ -681,18 +681,30 @@ BUNDLE_WRAPPER
         # Rename original ruby to ruby.bin
         FileUtils.mv(original_ruby, ruby_bin_backup)
 
-        # Create wrapper with the original name 'ruby'
+                # Create wrapper with the original name 'ruby'
         File.open(wrapper_path, "w") do |f|
           f.write <<~WRAPPER
             #!/bin/bash
-            export LD_LIBRARY_PATH="#{ruby_layer_path}/#{slug_vendor_ruby}/compat/lib:$LD_LIBRARY_PATH"
+
+            # Get the real directory where this script is located (following symlinks)
+            SOURCE="${BASH_SOURCE[0]}"
+            while [ -h "$SOURCE" ]; do
+              DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+              SOURCE="$(readlink "$SOURCE")"
+              [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+            done
+            SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+
+            COMPAT_LIB_DIR="$(dirname "$SCRIPT_DIR")/compat/lib"
+
+            export LD_LIBRARY_PATH="$COMPAT_LIB_DIR:$LD_LIBRARY_PATH"
 
             # Set OpenSSL configuration for Ruby 2.6.6 compatibility
             export OPENSSL_CONF=/dev/null
             export SSL_VERIFY_MODE=none
             export RUBY_OPENSSL_VERIFY_MODE=0
 
-            exec "#{ruby_bin_backup}" "$@"
+            exec "$SCRIPT_DIR/ruby.bin" "$@"
           WRAPPER
         end
         FileUtils.chmod(0755, wrapper_path)
