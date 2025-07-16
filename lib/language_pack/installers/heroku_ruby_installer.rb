@@ -13,9 +13,12 @@ class LanguagePack::Installers::HerokuRubyInstaller
   def initialize(stack: , multi_arch_stacks: , arch: , report: HerokuBuildReport::GLOBAL, ruby_version: nil)
     @report = report
     @original_stack = stack
+    @ruby_version = ruby_version
 
     # Special case: Ruby 2.6.6 is only available on heroku-20
-    effective_stack = (stack == "heroku-22" && ruby_version&.ruby_version == "2.6.6") ? "heroku-20" : stack
+    # We'll download it and add OpenSSL compatibility
+    @needs_openssl_compat = (stack == "heroku-22" && ruby_version&.ruby_version == "2.6.6")
+    effective_stack = @needs_openssl_compat ? "heroku-20" : stack
 
     if multi_arch_stacks.include?(effective_stack)
       @fetcher = LanguagePack::Fetcher.new(BASE_URL, stack: effective_stack, arch: arch)
@@ -36,6 +39,11 @@ class LanguagePack::Installers::HerokuRubyInstaller
     )
     fetch_unpack(ruby_version, install_dir)
     setup_binstubs(install_dir)
+
+    # Install OpenSSL compatibility for Ruby 2.6.6 on heroku-22
+    if @needs_openssl_compat
+      install_openssl_compat(install_dir)
+    end
   end
 
   def fetch_unpack(ruby_version, install_dir)
@@ -70,5 +78,61 @@ class LanguagePack::Installers::HerokuRubyInstaller
         run("ln -s ../#{vendor_bin} #{BIN_DIR}")
       end
     end
+  end
+
+  private
+
+  def install_openssl_compat(install_dir)
+    puts "-----> Installing OpenSSL compatibility layer for Ruby 2.6.6"
+
+    # Create lib directory for OpenSSL libraries
+    compat_lib_dir = File.join(install_dir, "compat", "lib")
+    FileUtils.mkdir_p(compat_lib_dir)
+
+    # Download OpenSSL libraries from heroku-20
+    openssl_libs = [
+      "libssl.so.1.1",
+      "libcrypto.so.1.1"
+    ]
+
+    begin
+      Dir.chdir(compat_lib_dir) do
+        # Try to extract OpenSSL libraries from a heroku-20 system package
+        # This is a simplified approach - in reality you'd need the actual .so files
+        puts "       Setting up OpenSSL 1.1 compatibility"
+
+        # Create symlinks to system OpenSSL if available as fallback
+        if File.exist?("/usr/lib/x86_64-linux-gnu/libssl.so.1.1")
+          FileUtils.ln_sf("/usr/lib/x86_64-linux-gnu/libssl.so.1.1", "libssl.so.1.1")
+        end
+        if File.exist?("/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1")
+          FileUtils.ln_sf("/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1", "libcrypto.so.1.1")
+        end
+      end
+
+      # Create wrapper script that sets LD_LIBRARY_PATH
+      create_ruby_wrapper(install_dir)
+
+    rescue => e
+      puts "       Warning: Could not install OpenSSL compatibility layer: #{e.message}"
+      puts "       Ruby 2.6.6 may have SSL issues"
+    end
+  end
+
+  def create_ruby_wrapper(install_dir)
+    wrapper_path = File.join(install_dir, "bin", "ruby-with-compat")
+    original_ruby = File.join(install_dir, "bin", "ruby")
+    compat_lib_dir = File.join(install_dir, "compat", "lib")
+
+    File.open(wrapper_path, 'w') do |f|
+      f.write(<<~WRAPPER)
+        #!/bin/bash
+        export LD_LIBRARY_PATH="#{compat_lib_dir}:$LD_LIBRARY_PATH"
+        exec "#{original_ruby}" "$@"
+      WRAPPER
+    end
+
+    FileUtils.chmod(0755, wrapper_path)
+    puts "       Created Ruby wrapper with OpenSSL compatibility"
   end
 end

@@ -297,6 +297,15 @@ private
     end
     setup_ruby_install_env(ruby_layer_path)
 
+    # OpenSSL compatibility for Ruby 2.6.6 on heroku-22
+    if @stack == "heroku-22" && ruby_version.ruby_version == "2.6.6"
+      compat_lib_path = "#{ruby_layer_path}/#{slug_vendor_ruby}/compat/lib"
+      if File.directory?(compat_lib_path)
+        ENV["LD_LIBRARY_PATH"] = "#{compat_lib_path}:#{ENV["LD_LIBRARY_PATH"]}"
+        puts "       Using OpenSSL compatibility layer for Ruby 2.6.6"
+      end
+    end
+
     # By default Node can address 1.5GB of memory, a limitation it inherits from
     # the underlying v8 engine. This can occasionally cause issues during frontend
     # builds where memory use can exceed this threshold.
@@ -386,6 +395,12 @@ private
     set_env_override "GEM_PATH", "#{gem_layer_path}/#{slug_vendor_base}:$GEM_PATH"
     set_env_override "PATH",      profiled_path.join(":")
     set_env_override "DISABLE_SPRING", "1"
+
+    # OpenSSL compatibility for Ruby 2.6.6 on heroku-22
+    if @stack == "heroku-22" && ruby_version.ruby_version == "2.6.6"
+      compat_lib_path = "#{gem_layer_path}/#{slug_vendor_ruby}/compat/lib"
+      set_env_override "LD_LIBRARY_PATH", "#{compat_lib_path}:$LD_LIBRARY_PATH"
+    end
 
     set_env_default "MALLOC_ARENA_MAX", "2"     if default_malloc_arena_max?
 

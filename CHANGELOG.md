@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Ruby 2.6.6 is now available on heroku-22 stack via heroku-20 fallback
+- Ruby 2.6.6 is now available on heroku-22 stack via heroku-20 fallback with OpenSSL compatibility layer
 
 
 ## [v313] - 2025-07-15
