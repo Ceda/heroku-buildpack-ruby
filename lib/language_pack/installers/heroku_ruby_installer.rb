@@ -89,35 +89,77 @@ class LanguagePack::Installers::HerokuRubyInstaller
     compat_lib_dir = File.join(install_dir, "compat", "lib")
     FileUtils.mkdir_p(compat_lib_dir)
 
-    begin
-      Dir.chdir(compat_lib_dir) do
-        puts "       Downloading OpenSSL 1.1.1 libraries from Ubuntu 20.04"
+    # Try multiple sources for OpenSSL 1.1.1 libraries
+    openssl_sources = [
+      {
+        name: "Ubuntu 20.04 Security",
+        url: "http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb"
+      },
+      {
+        name: "Ubuntu 20.04 Updates",
+        url: "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb"
+      },
+      {
+        name: "Ubuntu 20.04 Main",
+        url: "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb"
+      }
+    ]
 
-        # Download OpenSSL 1.1.1 from Ubuntu 20.04 archives
-        # These are the specific files that Ruby 2.6.6 needs
-        openssl_packages = {
-          "libssl1.1" => "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.20_amd64.deb",
-          "libcrypto1.1" => "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.20_amd64.deb"
-        }
+    success = false
 
-        # Download and extract OpenSSL package
-        run!("curl -L --fail --retry 3 --retry-connrefused --connect-timeout 10 --max-time 60 -s #{openssl_packages["libssl1.1"]} -o openssl.deb")
-        run!("ar x openssl.deb")
-        run!("tar xf data.tar.xz")
+    Dir.chdir(compat_lib_dir) do
+      openssl_sources.each do |source|
+        puts "       Trying #{source[:name]}..."
 
-        # Move the libraries to our compat directory
-        if File.exist?("usr/lib/x86_64-linux-gnu/libssl.so.1.1")
-          FileUtils.cp("usr/lib/x86_64-linux-gnu/libssl.so.1.1", ".")
-          FileUtils.cp("usr/lib/x86_64-linux-gnu/libcrypto.so.1.1", ".")
-          puts "       ✓ OpenSSL 1.1.1 libraries extracted successfully"
-        else
-          puts "       ⚠ OpenSSL libraries not found in expected location"
+        begin
+          # Download and extract OpenSSL package
+          run!("curl -L --fail --retry 3 --retry-connrefused --connect-timeout 10 --max-time 60 -s #{source[:url]} -o openssl.deb")
+          run!("ar x openssl.deb")
+          run!("tar xf data.tar.xz")
+
+          # Move the libraries to our compat directory
+          if File.exist?("usr/lib/x86_64-linux-gnu/libssl.so.1.1")
+            FileUtils.cp("usr/lib/x86_64-linux-gnu/libssl.so.1.1", ".")
+            FileUtils.cp("usr/lib/x86_64-linux-gnu/libcrypto.so.1.1", ".")
+            puts "       ✓ OpenSSL 1.1.1 libraries extracted successfully from #{source[:name]}"
+            success = true
+            break
+          else
+            puts "       ⚠ Libraries not found in expected location"
+          end
+
+        rescue => e
+          puts "       ⚠ Failed to download from #{source[:name]}: #{e.message}"
+        ensure
+          # Clean up temporary files
+          FileUtils.rm_rf(["usr", "control.tar.gz", "data.tar.xz", "debian-binary", "openssl.deb"]) rescue nil
         end
-
-        # Clean up temporary files
-        FileUtils.rm_rf(["usr", "control.tar.gz", "data.tar.xz", "debian-binary", "openssl.deb"])
       end
 
+      # If all downloads failed, try a different approach
+      unless success
+        puts "       Trying alternative: extract from heroku-20 Ruby..."
+        begin
+          # Download Ruby 2.6.6 from heroku-20 and extract OpenSSL libs from it
+          run!("curl -L --fail --retry 3 --retry-connrefused --connect-timeout 10 --max-time 60 -s https://heroku-buildpack-ruby.s3.us-east-1.amazonaws.com/heroku-20/ruby-2.6.6.tgz | tar xz")
+
+          # Look for OpenSSL libraries in the Ruby installation
+          if File.exist?("vendor/ruby-2.6.6/lib/libssl.so.1.1")
+            FileUtils.cp("vendor/ruby-2.6.6/lib/libssl.so.1.1", ".")
+            FileUtils.cp("vendor/ruby-2.6.6/lib/libcrypto.so.1.1", ".")
+            puts "       ✓ OpenSSL libraries extracted from Ruby installation"
+            success = true
+          end
+
+        rescue => e
+          puts "       ⚠ Alternative extraction failed: #{e.message}"
+        ensure
+          FileUtils.rm_rf(["vendor"]) rescue nil
+        end
+      end
+    end
+
+    if success
       # Create a Ruby wrapper script that sets up the environment
       wrapper_path = File.join(install_dir, "bin", "ruby_with_openssl")
       File.open(wrapper_path, "w") do |f|
@@ -130,9 +172,9 @@ class LanguagePack::Installers::HerokuRubyInstaller
       FileUtils.chmod(0755, wrapper_path)
       puts "       ✓ Created Ruby wrapper with OpenSSL compatibility"
 
-    rescue => e
-      puts "       ⚠ Failed to install OpenSSL compatibility: #{e.message}"
-      puts "       Continuing with system OpenSSL..."
+    else
+      puts "       ⚠ Failed to install OpenSSL compatibility from all sources"
+      puts "       Continuing with system OpenSSL (may cause issues)..."
     end
   end
 end
