@@ -21,7 +21,14 @@ class LanguagePack::Helpers::DownloadPresence
 
   def initialize(file_name:, arch: , multi_arch_stacks:, stacks: STACKS )
     @file_name = file_name
-    @stacks = stacks
+
+    # Special case: Ruby 2.6.6 is only available on heroku-20, not heroku-22
+    if file_name == "ruby-2.6.6.tgz"
+      @stacks = stacks.map { |stack| stack == "heroku-22" ? "heroku-20" : stack }
+    else
+      @stacks = stacks
+    end
+
     @fetchers = []
     @threads = []
     @stacks.each do |stack|

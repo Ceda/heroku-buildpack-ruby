@@ -10,12 +10,17 @@ class LanguagePack::Installers::HerokuRubyInstaller
   include LanguagePack::ShellHelpers
   attr_reader :fetcher
 
-  def initialize(stack: , multi_arch_stacks: , arch: , report: HerokuBuildReport::GLOBAL)
+  def initialize(stack: , multi_arch_stacks: , arch: , report: HerokuBuildReport::GLOBAL, ruby_version: nil)
     @report = report
-    if multi_arch_stacks.include?(stack)
-      @fetcher = LanguagePack::Fetcher.new(BASE_URL, stack: stack, arch: arch)
+    @original_stack = stack
+
+    # Special case: Ruby 2.6.6 is only available on heroku-20
+    effective_stack = (stack == "heroku-22" && ruby_version&.ruby_version == "2.6.6") ? "heroku-20" : stack
+
+    if multi_arch_stacks.include?(effective_stack)
+      @fetcher = LanguagePack::Fetcher.new(BASE_URL, stack: effective_stack, arch: arch)
     else
-      @fetcher = LanguagePack::Fetcher.new(BASE_URL, stack: stack)
+      @fetcher = LanguagePack::Fetcher.new(BASE_URL, stack: effective_stack)
     end
   end
 

@@ -505,7 +505,8 @@ private
     installer = LanguagePack::Installers::HerokuRubyInstaller.new(
       multi_arch_stacks: MULTI_ARCH_STACKS,
       stack: @stack,
-      arch: @arch
+      arch: @arch,
+      ruby_version: ruby_version
     )
 
     @ruby_download_check = LanguagePack::Helpers::DownloadPresence.new(
