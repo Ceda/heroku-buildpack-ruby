@@ -89,50 +89,50 @@ class LanguagePack::Installers::HerokuRubyInstaller
     compat_lib_dir = File.join(install_dir, "compat", "lib")
     FileUtils.mkdir_p(compat_lib_dir)
 
-    # Download OpenSSL libraries from heroku-20
-    openssl_libs = [
-      "libssl.so.1.1",
-      "libcrypto.so.1.1"
-    ]
-
     begin
       Dir.chdir(compat_lib_dir) do
-        # Try to extract OpenSSL libraries from a heroku-20 system package
-        # This is a simplified approach - in reality you'd need the actual .so files
-        puts "       Setting up OpenSSL 1.1 compatibility"
+        puts "       Downloading OpenSSL 1.1.1 libraries from Ubuntu 20.04"
 
-        # Create symlinks to system OpenSSL if available as fallback
-        if File.exist?("/usr/lib/x86_64-linux-gnu/libssl.so.1.1")
-          FileUtils.ln_sf("/usr/lib/x86_64-linux-gnu/libssl.so.1.1", "libssl.so.1.1")
+        # Download OpenSSL 1.1.1 from Ubuntu 20.04 archives
+        # These are the specific files that Ruby 2.6.6 needs
+        openssl_packages = {
+          "libssl1.1" => "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.20_amd64.deb",
+          "libcrypto1.1" => "http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.20_amd64.deb"
+        }
+
+        # Download and extract OpenSSL package
+        run!("curl -L --fail --retry 3 --retry-connrefused --connect-timeout 10 --max-time 60 -s #{openssl_packages["libssl1.1"]} -o openssl.deb")
+        run!("ar x openssl.deb")
+        run!("tar xf data.tar.xz")
+
+        # Move the libraries to our compat directory
+        if File.exist?("usr/lib/x86_64-linux-gnu/libssl.so.1.1")
+          FileUtils.cp("usr/lib/x86_64-linux-gnu/libssl.so.1.1", ".")
+          FileUtils.cp("usr/lib/x86_64-linux-gnu/libcrypto.so.1.1", ".")
+          puts "       ✓ OpenSSL 1.1.1 libraries extracted successfully"
+        else
+          puts "       ⚠ OpenSSL libraries not found in expected location"
         end
-        if File.exist?("/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1")
-          FileUtils.ln_sf("/usr/lib/x86_64-linux-gnu/libcrypto.so.1.1", "libcrypto.so.1.1")
-        end
+
+        # Clean up temporary files
+        FileUtils.rm_rf(["usr", "control.tar.gz", "data.tar.xz", "debian-binary", "openssl.deb"])
       end
 
-      # Create wrapper script that sets LD_LIBRARY_PATH
-      create_ruby_wrapper(install_dir)
+      # Create a Ruby wrapper script that sets up the environment
+      wrapper_path = File.join(install_dir, "bin", "ruby_with_openssl")
+      File.open(wrapper_path, "w") do |f|
+        f.write <<~WRAPPER
+          #!/bin/bash
+          export LD_LIBRARY_PATH="#{File.join(install_dir, "compat", "lib")}:$LD_LIBRARY_PATH"
+          exec "#{File.join(install_dir, "bin", "ruby")}" "$@"
+        WRAPPER
+      end
+      FileUtils.chmod(0755, wrapper_path)
+      puts "       ✓ Created Ruby wrapper with OpenSSL compatibility"
 
     rescue => e
-      puts "       Warning: Could not install OpenSSL compatibility layer: #{e.message}"
-      puts "       Ruby 2.6.6 may have SSL issues"
+      puts "       ⚠ Failed to install OpenSSL compatibility: #{e.message}"
+      puts "       Continuing with system OpenSSL..."
     end
-  end
-
-  def create_ruby_wrapper(install_dir)
-    wrapper_path = File.join(install_dir, "bin", "ruby-with-compat")
-    original_ruby = File.join(install_dir, "bin", "ruby")
-    compat_lib_dir = File.join(install_dir, "compat", "lib")
-
-    File.open(wrapper_path, 'w') do |f|
-      f.write(<<~WRAPPER)
-        #!/bin/bash
-        export LD_LIBRARY_PATH="#{compat_lib_dir}:$LD_LIBRARY_PATH"
-        exec "#{original_ruby}" "$@"
-      WRAPPER
-    end
-
-    FileUtils.chmod(0755, wrapper_path)
-    puts "       Created Ruby wrapper with OpenSSL compatibility"
   end
 end
